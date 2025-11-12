@@ -1,0 +1,623 @@
+---
+title: "ST362 Final Project Report"
+author: "Zach Reid"
+date: "`r Sys.Date()`"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+#Import necessary libraries
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(ggplot2)
+library(leaps)
+library(cowplot)
+library(knitr)
+library(flextable)
+library(tidyr)
+options(warn=0)
+```
+
+
+```{r, include=FALSE}
+#Import data
+reg_season<-read.csv2("C:\\Users\\zachr\\OneDrive\\Desktop\\Previous Courses\\ST362 - Regression Analysis\\2023-2024 NBA Player Stats - Regular.csv", )
+playoffs<-read.csv2("C:\\Users\\zachr\\OneDrive\\Desktop\\Previous Courses\\ST362 - Regression Analysis\\2023-2024 NBA Player Stats - Playoffs.csv")
+```
+
+```{r, include=FALSE}
+# Data Cleaning
+regular<-reg_season %>%
+  filter(Player %in% playoffs$Player)
+
+#Data contains duplicated for players who switch teams mid-season: eliminate these and only keep their stats for the entire season.
+regular<-regular%>%
+  group_by(Player) %>%
+  arrange(desc(Tm == 'TOT')) %>%
+  slice(1) %>%
+  ungroup()
+
+# Convert all numeric columns.
+cols_to_convert <- setdiff(names(regular), c("Player", "Pos", "Tm"))
+regular[cols_to_convert] <- lapply(regular[cols_to_convert], as.numeric)
+playoffs[cols_to_convert] <- lapply(playoffs[cols_to_convert], as.numeric)
+
+# Filter out rows where 'Pos' contains a dash (to eliminate small hybrid position groups)
+regular <- regular %>%
+  filter(!grepl("-", Pos))
+playoffs <- playoffs %>%
+  filter(!grepl("-", Pos))
+
+
+
+```
+## Introduction
+Within the world of sports, data analytics are surging to the forefront of the concerns of every team. Especially in the NBA, teams are more concerned with the best mathematical product they can put on the floor, sometimes at the cost of team chemistry or entertaining basketball. This has opened the door for a new wave of predictive analytics, but one sports trend has yet to be explained: the playoff performer. It is my goal to analyze this phenomenon using real player data from last season, and determine through careful consideration of statistics and intangibles whether being a 'playoff performer' is a predictable skill that players can learn, or whether it is simply something the best athletes are born with.
+
+## Objectives
+Using data from the 2023-2024 NBA regular season and playoffs, it is my goal to analyze the difference between regular season and playoff performances by each player who participated in the playoffs. With this information, I hope to isolate the factors that make up a playoff performer, whether it has to do with size, skillset, or simply an intangible factor that escapes the average athlete. This will be accomplished through several methods of analysis, with a focus on linear regression to attempt to predict how the playoffs affect performance, and variable selection to determine which skills the best playoff performers have in common.
+
+## Data Description
+This data was collected from a kaggle dataset, found at this link: https://www.kaggle.com/datasets/vivovinco/2023-2024-nba-player-stats/data?select=2023-2024+NBA+Player+Stats+-+Regular.csv
+
+The data was sourced from the website basketballreference.com, a site hosting the largest NBA statistical database on the internet. The data within the database is taken directly from the NBA and its games.
+
+Several variables are measured, but there are a few important ones that we will focus on. They are described below:
+
+Player: Name of the player
+
+Pos: Position of the player
+
+Age: Player's Age
+
+MP: Minutes Played Per Game
+
+FG%: Field Goal Percentage, the percentage of shots a player makes versus how many they take.
+
+3P%: Three Point Percentage, the percentage of shots a player makes from beyond the
+three-point arc.
+
+2P%: Two Point Percentage, the percentage of shots a player makes from within the three-point
+arc.
+
+eFG%: Effective Field Goal Percentage. Same as FG%, but every three point make counts for 1.5,
+adjusting for the extra point on the shot.
+
+FT%: Free Throw Percentage, the percentage of foul shots a player makes from the free-throw
+line.
+
+FTA: Free Throw Attempts, the amount of foul shots a player is awarded per game.
+
+TRB: Total Rebounds Per Game
+
+AST: Assists Per Game
+
+STL: Steals Per Game
+
+BLK: Blocks Per Game
+
+TOV: Turnovers Per Game
+
+PF: Personal Fouls Per Game
+
+PTS: Points Per Game
+
+The sample size is 214, the players who participated in the Playoffs (all NBA players participate in the regular season, barring injury). This also eliminated some players with a hybrid position to improve visual output. These players were not entirely significant to the sample.
+
+## Exploratory Data Analysis
+To begin analysis, we must first establish who the best players in this league are in a few key areas.
+
+Let us begin with some summary statistics across the whole league, and then grouped by position.
+```{r, echo=FALSE}
+# Regular season summary statistics for all players
+regular_summary <- regular %>%
+  summarize(
+    Mean_PTS = mean(PTS, na.rm = TRUE),
+    Median_PTS = median(PTS, na.rm = TRUE),
+    SD_PTS = sd(PTS, na.rm = TRUE),
+    Mean_AST = mean(AST, na.rm = TRUE),
+    Median_AST = median(AST, na.rm = TRUE),
+    SD_AST = sd(AST, na.rm = TRUE),
+    Mean_TRB = mean(TRB, na.rm = TRUE),
+    Median_TRB = median(TRB, na.rm = TRUE),
+    SD_TRB = sd(TRB, na.rm = TRUE)
+  )
+
+# Print the regular season summary
+print("Regular Season Summary Statistics:")
+print(regular_summary)
+
+# Regular season summary statistics grouped by position
+regular_summary_by_pos <- regular %>%
+  group_by(Pos) %>%
+  summarize(
+    Mean_PTS = mean(PTS, na.rm = TRUE),
+    Median_PTS = median(PTS, na.rm = TRUE),
+    SD_PTS = sd(PTS, na.rm = TRUE),
+    Mean_AST = mean(AST, na.rm = TRUE),
+    Median_AST = median(AST, na.rm = TRUE),
+    SD_AST = sd(AST, na.rm = TRUE),
+    Mean_TRB = mean(TRB, na.rm = TRUE),
+    Median_TRB = median(TRB, na.rm = TRUE),
+    SD_TRB = sd(TRB, na.rm = TRUE)
+  )
+
+# Print the regular season summary by position
+print("Regular Season Summary Statistics by Position:")
+print(regular_summary_by_pos)
+
+# Playoff summary statistics for all players
+playoff_summary <- playoffs %>%
+  summarize(
+    Mean_PTS = mean(PTS, na.rm = TRUE),
+    Median_PTS = median(PTS, na.rm = TRUE),
+    SD_PTS = sd(PTS, na.rm = TRUE),
+    Mean_AST = mean(AST, na.rm = TRUE),
+    Median_AST = median(AST, na.rm = TRUE),
+    SD_AST = sd(AST, na.rm = TRUE),
+    Mean_TRB = mean(TRB, na.rm = TRUE),
+    Median_TRB = median(TRB, na.rm = TRUE),
+    SD_TRB = sd(TRB, na.rm = TRUE)
+  )
+
+# Print the playoff summary
+print("Playoff Summary Statistics:")
+print(playoff_summary)
+
+# Playoff summary statistics grouped by position
+playoff_summary_by_pos <- playoffs %>%
+  group_by(Pos) %>%
+  summarize(
+    Mean_PTS = mean(PTS, na.rm = TRUE),
+    Median_PTS = median(PTS, na.rm = TRUE),
+    SD_PTS = sd(PTS, na.rm = TRUE),
+    Mean_AST = mean(AST, na.rm = TRUE),
+    Median_AST = median(AST, na.rm = TRUE),
+    SD_AST = sd(AST, na.rm = TRUE),
+    Mean_TRB = mean(TRB, na.rm = TRUE),
+    Median_TRB = median(TRB, na.rm = TRUE),
+    SD_TRB = sd(TRB, na.rm = TRUE)
+  )
+
+# Print the playoff summary by position
+print("Playoff Summary Statistics by Position:")
+print(playoff_summary_by_pos)
+
+
+# Merge the two data frames by the player ID or relevant key
+combined_data <- inner_join(regular, playoffs, by = "Player", suffix = c("_reg", "_play")) 
+
+```
+A couple of key takeaways from the summary analysis I performed: The average statistical output across the league was 10.15 points per game, 2.38 assists, and 3.8 rebounds. In the playoffs, these averages tended to decrease to 8.45 points, 1.81 assists, and 3.47 rebounds. This can be explained by the fact that most players, aside from the very best in the league, get less playing time when the stakes get higher. This same decrease is seen when analyzing these statistics grouped by position, further supporting this hypothesis. 
+
+When analyzing the averages across the top ten scorers at each position, further evidence of this point was found. That is, even strong scorers are scoring less on average come playoff time. This suggests that in addition to reduced playing time for those other than the very best, the playoffs in general contain lower-scoring games with higher defensive intensity, which is a well-known fact across the NBA. 
+
+```{r, echo=FALSE}
+# Find top 10 scorers per position in the regular season
+top_scorers_regular <- combined_data %>%
+  group_by(Pos_reg) %>%
+  arrange(desc(PTS_reg)) %>%
+  slice_head(n = 10) %>%  # Get the top 10 scorers per position
+  ungroup()
+
+# Summary statistics for the top 10 scorers in the regular season
+top_scorers_regular_summary <- top_scorers_regular %>%
+  summarize(
+    Mean_PTS = mean(PTS_reg, na.rm = TRUE),
+    Median_PTS = median(PTS_reg, na.rm = TRUE),
+    SD_PTS = sd(PTS_reg, na.rm = TRUE),
+    Mean_AST = mean(AST_reg, na.rm = TRUE),
+    Median_AST = median(AST_reg, na.rm = TRUE),
+    SD_AST = sd(AST_reg, na.rm = TRUE),
+    Mean_TRB = mean(TRB_reg, na.rm = TRUE),
+    Median_TRB = median(TRB_reg, na.rm = TRUE),
+    SD_TRB = sd(TRB_reg, na.rm = TRUE)
+  )
+
+# Print the top 10 regular season summary
+print("Top 10 Regular Season Summary Statistics:")
+print(top_scorers_regular_summary)
+
+# Top 10 scorers in the playoffs (matching the regular season top 10)
+top_scorers_playoff <- combined_data %>%
+  filter(Player %in% top_scorers_regular$Player)
+
+# Summary statistics for the top 10 scorers in the playoffs
+top_scorers_playoff_summary <- top_scorers_playoff %>%
+  summarize(
+    Mean_PTS = mean(PTS_play, na.rm = TRUE),
+    Median_PTS = median(PTS_play, na.rm = TRUE),
+    SD_PTS = sd(PTS_play, na.rm = TRUE),
+    Mean_AST = mean(AST_play, na.rm = TRUE),
+    Median_AST = median(AST_play, na.rm = TRUE),
+    SD_AST = sd(AST_play, na.rm = TRUE),
+    Mean_TRB = mean(TRB_play, na.rm = TRUE),
+    Median_TRB = median(TRB_play, na.rm = TRUE),
+    SD_TRB = sd(TRB_play, na.rm = TRUE)
+  )
+
+# Print the top 10 playoff summary
+print("Top 10 Playoff Summary Statistics:")
+print(top_scorers_playoff_summary)
+
+# Top 10 scorers by position summary for regular season
+top_scorers_regular_summary_by_pos <- top_scorers_regular %>%
+  group_by(Pos_reg) %>%
+  summarize(
+    Mean_PTS = mean(PTS_reg, na.rm = TRUE),
+    Median_PTS = median(PTS_reg, na.rm = TRUE),
+    SD_PTS = sd(PTS_reg, na.rm = TRUE),
+    Mean_AST = mean(AST_reg, na.rm = TRUE),
+    Median_AST = median(AST_reg, na.rm = TRUE),
+    SD_AST = sd(AST_reg, na.rm = TRUE),
+    Mean_TRB = mean(TRB_reg, na.rm = TRUE),
+    Median_TRB = median(TRB_reg, na.rm = TRUE),
+    SD_TRB = sd(TRB_reg, na.rm = TRUE)
+  )
+
+# Print the top 10 regular season summary by position
+print("Top 10 Regular Season Summary Statistics by Position:")
+print(top_scorers_regular_summary_by_pos)
+
+# Top 10 scorers by position summary for playoffs
+top_scorers_playoff_summary_by_pos <- top_scorers_playoff %>%
+  group_by(Pos_reg) %>%
+  summarize(
+    Mean_PTS = mean(PTS_play, na.rm = TRUE),
+    Median_PTS = median(PTS_play, na.rm = TRUE),
+    SD_PTS = sd(PTS_play, na.rm = TRUE),
+    Mean_AST = mean(AST_play, na.rm = TRUE),
+    Median_AST = median(AST_play, na.rm = TRUE),
+    SD_AST = sd(AST_play, na.rm = TRUE),
+    Mean_TRB = mean(TRB_play, na.rm = TRUE),
+    Median_TRB = median(TRB_play, na.rm = TRUE),
+    SD_TRB = sd(TRB_play, na.rm = TRUE)
+  )
+
+# Print the top 10 playoff summary by position
+print("Top 10 Playoff Summary Statistics by Position:")
+print(top_scorers_playoff_summary_by_pos)
+
+```
+
+Then, a summary of the best scorers in the league. Generally, this is a good indication for a player's overall skill level and importance to their team.
+
+```{r, echo=FALSE}
+# Filter for players who score over 23 points per game
+regular_23_plus <- combined_data %>%
+  filter(PTS_reg > 23)
+
+# Find top 10 scorers per position (only including players scoring over 23 PPG)
+top_scorers <- regular_23_plus %>%
+  arrange(desc(PTS_reg)) %>%     # Sort by points scored (PTS) in descending order
+  group_by(Pos_reg) %>%
+  slice_max(PTS_reg, n = 10) %>%  # Get the top 10 scorers per position
+  ungroup()
+
+# Add a column combining player name and PTS for labels
+top_scorers <- top_scorers %>%
+  mutate(Label = paste0(Player, " (", PTS_reg, ")"))
+
+# Create the boxplot with labels for top scorers
+ggplot(regular_23_plus, aes(x = reorder(Pos_reg, -PTS_reg, FUN = max), y = PTS_reg)) +
+  geom_boxplot(alpha = 0.7, fill = "lightblue", color = "blue") +  # Boxplot to show distribution
+  labs(
+    title = "Boxplot of Points Per Game by Position (Over 23 PPG)",
+    x = "Position",
+    y = "Points Per Game (PTS)"
+  ) +
+  scale_y_continuous(
+    limits = c(21, max(regular_23_plus$PTS_reg, na.rm = TRUE) + 5),  # Adjust y-axis to fit data
+    breaks = seq(0, max(regular_23_plus$PTS_reg, na.rm = TRUE), by = 5)  # Ticks at every 5
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    axis.text.x = element_text(angle = 45, hjust = 1)  # Tilt x-axis labels for better readability
+  )
+```
+This plot gives us valuable insight into who the most heavily depended-on, reliable scorers in the game are. We group by position for the sake of visual clarity and to see that the best players in the world come in many different positions and roles.
+
+Next, we examine the effectiveness of these top scorers in the playoffs vs. the regular season.
+```{r, echo=FALSE}
+# Identify top 10 scorers per position in the regular season
+top_10_regular <- combined_data %>%
+  arrange(desc(PTS_reg)) %>%
+  group_by(Pos_reg) %>%
+  slice_max(PTS_reg, n = 10) %>%
+  ungroup()
+
+# Filter data to include only players meeting the scoring criteria
+filtered_comparison_data <- top_10_regular %>%
+  filter(PTS_reg > 23, PTS_play > 23)
+
+# Create the label column
+filtered_comparison_data <- filtered_comparison_data %>%
+  mutate(Label = paste0(Player, "\nReg: ", PTS_reg, ", Play: ", PTS_play))
+
+# Create the plot
+ggplot(filtered_comparison_data, aes(x = PTS_reg, y = PTS_play, color = Pos_reg)) +
+  geom_point(size = 4, alpha = 0.7) + # Points for players
+  geom_text(
+    aes(label = Label),
+    size = 3, vjust = -0.5, hjust = 0.5, 
+    position = position_jitter(width = 0.5, height = 0.5)
+  ) + # Add jittered labels
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray") + # Reference line
+  labs(
+    title = "Regular Season vs Playoff Scoring",
+    subtitle = "Players Scoring >23 in Regular Season and >23 in Playoffs",
+    x = "Regular Season Points Per Game",
+    y = "Playoff Points Per Game",
+    color = "Position"
+  ) +
+  xlim(23, 36) +
+  ylim(23,35) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+```
+
+This plot shows us the trend among elite scorers in the league, that they tend to step their games up during the playoffs. However, it would be naive to assume that players just "get worse" during the playoffs. Let's take a look at assist numbers for these same players to see if we notice a trend in the direction of points vs assists.
+
+```{r, echo=FALSE}
+# Filter data to include only players meeting the assists criteria
+filtered_comparison_data_assists <- combined_data %>%
+  filter(AST_reg > 4, AST_play > 4) # Adjust filtering threshold as needed
+
+# Create the label column
+filtered_comparison_data_assists <- filtered_comparison_data_assists %>%
+  mutate(Label = paste0(Player, "\nReg: ", AST_reg, ", Play: ", AST_play))
+
+# Create the plot for assists
+ggplot(filtered_comparison_data_assists, aes(x = AST_reg, y = AST_play, color = Pos_reg)) +
+  geom_point(size = 4, alpha = 0.7) +
+  geom_text(
+    aes(label = Label),
+    size = 3, vjust = -0.5, hjust = 0.5,
+    position = position_jitter(width = 0.5, height = 0.5)
+  ) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray") +
+  labs(
+    title = "Regular Season vs Playoff Assists",
+    subtitle = "Players with >4 Assists in Regular Season and >4 in Playoffs",
+    x = "Regular Season Assists Per Game",
+    y = "Playoff Assists Per Game",
+    color = "Position"
+  ) +
+  xlim(4.5, 11) +
+  ylim(4.5, 10.5) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+```
+
+Based on this exploratory analysis, we can see that most elite offensive players tend to get more aggressive, raising their scoring and lowering their assists in the playoffs. However, some players lower their scoring and raise their assists, likely as a result of the additional defensive focus they receive in the playoffs. 
+
+## Confirmatory Data Analysis
+
+With some exploratory analysis completed, it is now time to conduct confirmatory analysis by fitting some regression models to help identify the factors that make a playoff performer stand out.
+
+To start, we will fit some models to determine how regular season performance can predict playoff performance.
+
+```{r, echo=FALSE}
+
+# Fit a linear model for playoff scoring based on regular season scoring
+model <- lm(PTS_play ~ PTS_reg, data = combined_data)
+
+# Display the summary of the model to check the coefficients and statistics
+summary(model)
+
+```
+
+This model is basic, and only the first attempt I made at creating a predictive analysis, but we can see there is already a moderately strong correlation with an adjusted R-Squared value of 0.8468. The coefficient estimates of b0=-2.0406 and b1=1.0466 are statistically significant down to the 0.001 level, indicating a strong confidence in these estimates.
+
+To expand our analysis, it makes sense to select a few more variables that will be strong indicators of playoff scoring ability. For this, stepwise refinement will be used to select a few more variables for predictors.
+
+```{r, echo=FALSE}
+# Select numeric columns ending in '_reg' only, excluding '_play' and 'Tm'
+predictors <- names(combined_data)[
+  grep("_reg$", names(combined_data)) & 
+  !grepl("_play$", names(combined_data)) &  # Exclude columns ending in '_play'
+  !grepl("^Tm", names(combined_data)) &    # Exclude columns beginning in 'Tm'
+  !grepl("^Pos", names(combined_data)) &   #Exclude columns beginning in 'Pos'
+  !grepl("^Rk", names(combined_data)) &    #Exclude columns beginning in 'Rk'
+  sapply(combined_data[, grep("_reg$", names(combined_data))], is.numeric)
+]
+
+
+# Create the formula for the full model with only '_reg' variables
+formula <- as.formula(paste("PTS_play", "~", paste(predictors, collapse = " + ")))
+
+# Create a null model (intercept only)
+null_model <- lm(PTS_play ~ 1, data = combined_data)
+
+# Fit the initial full model including only '_reg' variables
+full_model <- lm(formula, data = combined_data)
+
+# Perform stepwise selection (both directions) using the null model and the full model scope
+step_model <- step(null_model, 
+                   scope = list(lower = null_model, upper = full_model), 
+                   direction = "forward") 
+
+# Display the summary of the final model
+summary(step_model)
+coef(step_model)
+
+
+```
+
+
+Based on AIC stepwise refinement, the variables that are best to use are PTS, GS, FT, AST, 2P, FTA, and 3P. These are all trademarks of a high-usage, high-volume player, what we may refer to as the "alpha dogs" of the sports world. These variables create one model that we can compare to the other ones we come up with. When these variables are used to predict playoff points per game for a player, the adjusted R^2 value is 0.8635, suggesting a slightly stronger linear correlation. We can also select variables using the best subsets, measuring by BIC and R^2:
+
+```{r, echo=FALSE}
+# Prepare the dataset for regsubsets
+subset_data <- combined_data[, c("PTS_play", predictors)]
+
+# Run the regsubsets function
+regsubsets_model <- regsubsets(
+  PTS_play ~ .,            # Formula using all predictors in subset_data
+  data = subset_data,      # Data with only relevant predictors
+  nvmax = length(predictors), # Maximum number of predictors to consider
+  method = "forward"    # Method for subset selection (can also use "forward", "backward")
+)
+
+# Summarize the regsubsets model
+regsubsets_summary <- summary(regsubsets_model)
+
+plot(regsubsets_summary$bic, xlab="Number of Variables", ylab="BIC", type="b")# YOUR CODE HERE
+
+plot(regsubsets_model, scale="bic")
+coef(regsubsets_model, 3)
+```
+
+In contrast with the AIC stepwise refinement, the BIC subset selection revealed that the most effective model contains only three variables: PTS, FT, and GS. This was somewhat expected, as BIC imposes larger penalties for the number of parameters, although it was surprising to me that FT were a more important parameter than 2P or 3P. 
+
+We can now compare these two models to our initial model, and see which factors are truly the best predictors of how a player will score in the playoffs.
+
+```{r, echo=FALSE}
+#Basic Model
+
+basic_model=lm(PTS_play ~ PTS_reg, data=combined_data)
+
+combined_data$basic_predicted <- predict(basic_model)
+
+#Scatter plot of actual vs predicted
+ggplot(combined_data, aes(x= basic_predicted, y = PTS_play)) +
+  geom_point(alpha = 0.7, color = "blue") +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red") + #Reference Line
+  labs(
+    title = "Actual vs Predicted Playoff Points (Basic Model)",
+    x = "Predicted Playoff Points",
+    y = "Actual Playoff Points"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    axis.text = element_text(size = 10),
+    axis.title = element_text(size = 12)
+  )
+
+#AIC Model
+aic_best_model=lm(PTS_play ~ PTS_reg+GS_reg+FT_reg+AST_reg+X2P_reg+FTA_reg+X3P_reg, data=combined_data)
+
+# Add predictions to the data
+combined_data$aic_predicted <- predict(aic_best_model)
+
+# Scatter plot of actual vs predicted
+ggplot(combined_data, aes(x = aic_predicted, y = PTS_play)) +
+  geom_point(alpha = 0.7, color = "blue") +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red") + # Reference line
+  labs(
+    title = "Actual vs. Predicted Playoff Points (AIC Model)",
+    x = "Predicted Playoff Points",
+    y = "Actual Playoff Points"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    axis.text = element_text(size = 10),
+    axis.title = element_text(size = 12)
+  )
+
+#BIC Model
+bic_best_model=lm(PTS_play ~ PTS_reg+FT_reg+GS_reg, data=combined_data)
+
+#Add predictions
+combined_data$bic_predicted <- predict(bic_best_model)
+
+#Scatter plot of actual vs predicted
+ggplot(combined_data, aes(x=bic_predicted, y=PTS_play))+
+  geom_point(alpha=0.7, color="blue") +
+  geom_abline(slope=1, intercept=0, linetype="dashed", color="red") + #Reference line
+  labs(
+    title = "Actual vs. Predicted Playoff Points (BIC Model)",
+    x = "Predicted Playoff Points",
+    y = "Actual Playoff Points"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    axis.text = element_text(size = 10),
+    axis.title = element_text(size = 12)
+  )
+  
+                 
+```
+
+```{r, echo=FALSE}
+summary(basic_model)
+summary(aic_best_model)
+summary(bic_best_model)
+```
+Based on the three models we are comparing, there are a couple of conclusions that can be drawn.
+
+First of all, it is clear that the model from AIC stepwise refinement gives us the best correlation, and the lowest residual standard error. This tells us that we got the most predictive model when analyzing the variables: PTS, GS, FT, AST, 2P, FTA, 3P, to predict a player's playoff scoring. 
+
+When analyzing the graphs of predicted vs. actual playoff points, we can see that the models are remarkably similar, usually only missing by a couple of points at worst. In fact, 50% of the predictions fall within 1.6 points of the actual playoff scoring values when using the AIC model. 
+
+To give a final answer to our question, we will compare who the three models predict to be the top playoff scorers in the league, versus their actual numbers.
+
+## Conclusion
+
+```{r, echo=FALSE}
+
+# Add ranks for actual and predicted values
+combined_data <- combined_data %>%
+  mutate(
+    Actual_Rank = rank(-PTS_play, ties.method = "min"),  # Rank actual playoff scoring (higher = better)
+    Basic_Rank = rank(-basic_predicted, ties.method = "min"),  # Rank basic predicted values
+    AIC_Rank = rank(-aic_predicted, ties.method = "min"),  # Rank AIC predicted values
+    BIC_Rank = rank(-bic_predicted, ties.method = "min")   # Rank BIC predicted values
+  )
+
+# Ensure the columns are present before selecting
+if(all(c("Player", "PTS_play", "Actual_Rank", "basic_predicted", "Basic_Rank", 
+         "aic_predicted", "AIC_Rank", "bic_predicted", "BIC_Rank") %in% colnames(combined_data))) {
+  
+  # Create the final table
+  final_table <- combined_data %>%
+    dplyr::select(Player, PTS_play, Actual_Rank, basic_predicted, Basic_Rank, 
+           aic_predicted, AIC_Rank, bic_predicted, BIC_Rank)
+
+  # Rename columns for clarity
+  colnames(final_table) <- c("Player", "Actual", "Actual_Rank", 
+                             "Basic_Predicted", "Basic_Rank", 
+                             "AIC_Predicted", "AIC_Rank", 
+                             "BIC_Predicted", "BIC_Rank")
+} else {
+  stop("One or more columns are missing from combined_data.")
+}
+
+# Sort the table by Actual_Rank in descending order
+sorted_table <- final_table %>%
+  dplyr::arrange(Actual_Rank)
+
+# Display the top 20 results using flextable
+flextable(head(sorted_table, 20)) %>%
+  flextable::set_table_properties(width = c(1, 1, 1, 1, 1, 1, 1, 1)) %>%
+  flextable::theme_vanilla()  # Optional: apply a theme for better styling
+
+
+```
+
+From observing this table, we can draw a few conclusions about the models predictions of the data.
+
+First, the basic model does have some predictive power, but evidently the overfitting based on regular season points is not a good predictor. Rather, it serves as a better indicator for those who over or underperform compared to their expectations. 
+
+Second, the AIC model appears to overrate the scoring of those who take and make alot of free throws. This is not entirely unsurprising, as making free throws obviously directly leads to points, and attempting more free throws usually signals a more aggressive player. However, in the regular season, players attempt more free throws on average due to a softer whistle, and they make more due to less rambunctious crowds. Therefore, this is an imperfect predictor, even though there is usually a small error in prediction vs. actual scoring. 
+
+Third, the BIC model underrates players that missed a significant amount of regular season games due to injury. This factor may have been improved if a metric such as GS/GP has been used, measuring the percentage of games that a player participated in, in which they appeared in the starting lineup (signifying a prominent role in the team that night). However, other than an interesting outlier in Khris Middleton (missed majority of the season and struggled to get healthy in the games he did play) the BIC model is similar in accuracy to the AIC model.
+
+Fourth, interestingly, the models were unanimous in picking the leading scorer of the playoffs, Joel Embiid. He was far and away the regular season's leading scorer, so this is not terribly surprising, and he did actually lead the playoffs in scoring as well. However, this goes to show the metric I used to determine playoff performance with may have been imperfect on its own, as Embiid did perform well but lost in six games to the New York Knicks in the first round, a disappointing result for such a promising player.
+
+In conclusion, while the analysis was imperfect from a predictor and response variable standpoint, it does seem possible to predict how a player will perform in the playoffs based on their regular season performance, with a moderate degree of accuracy. In particular, a player's playoff scoring can be reasonably estimated based on how well they perform in the following statistical regular season categories: Points, Free Throws Made, and Games Started, and to a lesser degree, Assists, Free Throws Attempted, and 2 and 3 pointers made. In future research, I will refine the metrics by which I measure 'performance' to expand past regular box score statistics, and attempt to isolate more factors that predict how well a player will perform in the playoffs. Based on the research conducted in this project, it would appear that: 1) a significant amount of elite players tend to increase their scoring output in the playoffs, usually by way of increased aggressiveness. As a result, 2) the average player actually decreases in their performance, based on opportunity. 3) While there are certain factors that define a playoff performer in terms of scoring, they tend to display these traits during the regular season as well, and so there does not appear to be significant evidence of playoff risers and fallers as described in the introduction.
